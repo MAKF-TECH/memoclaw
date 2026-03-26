@@ -1,206 +1,69 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MemoClaw — Login</title>
+  <title>MemoClaw — Sign In</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
-  <style>
-    :root {
-      --bg-primary: #0a0a0f;
-      --bg-card: #1a1a26;
-      --bg-input: #16161f;
-      --border: #2a2a3a;
-      --text-primary: #e8e8f0;
-      --text-secondary: #8888aa;
-      --text-muted: #555577;
-      --accent: #7c5cff;
-      --accent-hover: #9477ff;
-      --red: #f87171;
-      --radius: 10px;
-    }
-
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .login-container {
-      width: 100%;
-      max-width: 400px;
-      padding: 20px;
-    }
-
-    .login-header {
-      text-align: center;
-      margin-bottom: 32px;
-    }
-
-    .login-header h1 {
-      font-size: 28px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
-      margin-bottom: 8px;
-    }
-
-    .login-header p {
-      color: var(--text-secondary);
-      font-size: 14px;
-    }
-
-    .login-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 28px;
-    }
-
-    .form-group {
-      margin-bottom: 18px;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-secondary);
-      margin-bottom: 6px;
-    }
-
-    .form-group input {
-      width: 100%;
-      padding: 10px 14px;
-      background: var(--bg-input);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text-primary);
-      font-size: 15px;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-
-    .form-group input:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.15);
-    }
-
-    .login-btn {
-      width: 100%;
-      padding: 12px;
-      background: var(--accent);
-      border: none;
-      border-radius: 6px;
-      color: white;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.2s;
-      margin-top: 6px;
-    }
-
-    .login-btn:hover { background: var(--accent-hover); }
-    .login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    .error-msg {
-      background: rgba(248, 113, 113, 0.1);
-      border: 1px solid rgba(248, 113, 113, 0.3);
-      border-radius: 6px;
-      padding: 10px 14px;
-      margin-bottom: 18px;
-      font-size: 13px;
-      color: var(--red);
-      display: none;
-    }
-
-    .error-msg.visible { display: block; }
-
-    .login-footer {
-      text-align: center;
-      margin-top: 20px;
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-  </style>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode: 'class', theme: { extend: { colors: { surface: { 900:'#0b0b12', 950:'#07070d' }, brand: { 400:'#8b5cf6', 500:'#7c3aed', 600:'#6d28d9' } }, fontFamily: { sans: ['Inter','system-ui','sans-serif'] } } } }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
-<body>
-  <div class="login-container">
-    <div class="login-header">
-      <h1>🧠 MemoClaw</h1>
-      <p>Sign in to your memory dashboard</p>
+<body class="bg-surface-950 text-gray-100 font-sans antialiased min-h-screen flex items-center justify-center">
+  <div class="w-full max-w-sm px-6">
+
+    <!-- Logo -->
+    <div class="text-center mb-10">
+      <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-brand-500/10 border border-brand-500/20 mb-4">
+        <span class="text-2xl">🧠</span>
+      </div>
+      <h1 class="text-xl font-bold tracking-tight">MemoClaw</h1>
+      <p class="text-sm text-gray-500 mt-1.5">Sign in to your memory dashboard</p>
     </div>
 
-    <div class="login-card">
-      <div id="error-msg" class="error-msg"></div>
+    <!-- Card -->
+    <div class="bg-white/[0.03] border border-white/[0.06] rounded-xl p-6">
+      <div id="err" class="hidden bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-2.5 mb-4 text-xs text-red-400"></div>
 
-      <form id="login-form" onsubmit="handleLogin(event)">
-        <div class="form-group">
-          <label for="username">Username</label>
-          <input type="text" id="username" name="username" autocomplete="username"
-                 placeholder="admin" required autofocus>
+      <form onsubmit="login(event)">
+        <div class="mb-4">
+          <label class="block text-xs font-medium text-gray-500 mb-1.5">Username</label>
+          <input type="text" id="user" autocomplete="username" required autofocus
+            class="w-full bg-white/[0.03] border border-white/[0.08] rounded-lg px-3.5 py-2.5 text-sm text-gray-200 placeholder:text-gray-600 outline-none focus:border-brand-400/50 focus:ring-1 focus:ring-brand-400/20 transition-all"
+            placeholder="admin">
         </div>
-
-        <div class="form-group">
-          <label for="password">Password</label>
-          <input type="password" id="password" name="password" autocomplete="current-password"
-                 placeholder="••••••••" required>
+        <div class="mb-5">
+          <label class="block text-xs font-medium text-gray-500 mb-1.5">Password</label>
+          <input type="password" id="pass" autocomplete="current-password" required
+            class="w-full bg-white/[0.03] border border-white/[0.08] rounded-lg px-3.5 py-2.5 text-sm text-gray-200 placeholder:text-gray-600 outline-none focus:border-brand-400/50 focus:ring-1 focus:ring-brand-400/20 transition-all"
+            placeholder="••••••••">
         </div>
-
-        <button type="submit" class="login-btn" id="login-btn">Sign In</button>
+        <button type="submit" id="btn"
+          class="w-full py-2.5 bg-brand-500 hover:bg-brand-400 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm">
+          Sign In
+        </button>
       </form>
     </div>
 
-    <div class="login-footer">
-      Default credentials configured via environment variables
-    </div>
+    <p class="text-center text-[11px] text-gray-600 mt-5">Default: admin / memoclaw — change in .env</p>
   </div>
 
   <script>
-    async function handleLogin(e) {
+    async function login(e) {
       e.preventDefault();
-      const btn = document.getElementById('login-btn');
-      const errorEl = document.getElementById('error-msg');
-      errorEl.classList.remove('visible');
-      btn.disabled = true;
-      btn.textContent = 'Signing in...';
-
+      const btn = document.getElementById('btn'), err = document.getElementById('err');
+      err.classList.add('hidden'); btn.disabled = true; btn.textContent = 'Signing in…';
       try {
-        const res = await fetch('/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            username: document.getElementById('username').value,
-            password: document.getElementById('password').value,
-          }),
-        });
-
-        const data = await res.json();
-
-        if (res.ok && data.status === 'ok') {
-          window.location.href = '/';
-        } else {
-          errorEl.textContent = data.detail || data.error || 'Invalid credentials';
-          errorEl.classList.add('visible');
-        }
-      } catch (err) {
-        errorEl.textContent = 'Connection error. Is the server running?';
-        errorEl.classList.add('visible');
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Sign In';
-      }
+        const r = await fetch('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: document.getElementById('user').value, password: document.getElementById('pass').value }) });
+        const d = await r.json();
+        if (r.ok && d.status === 'ok') location.href = '/';
+        else { err.textContent = d.detail || 'Invalid credentials'; err.classList.remove('hidden'); }
+      } catch { err.textContent = 'Connection error'; err.classList.remove('hidden'); }
+      finally { btn.disabled = false; btn.textContent = 'Sign In'; }
     }
-
-    // If pressing Enter in password field
-    document.getElementById('password').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') handleLogin(e);
-    });
   </script>
 </body>
 </html>

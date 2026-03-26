@@ -1,939 +1,458 @@
-/**
- * MemoClaw Web UI — Dashboard Application
- */
+/** MemoClaw Dashboard — Modern UI */
 
-// ── State ─────────────────────────────────────────────────────────
+const S = { view: 'dashboard', containers: [], mPage: 0, dPage: 0, user: null };
 
-const state = {
-  currentView: 'dashboard',
-  containers: [],
-  memoriesPage: 0,
-  documentsPage: 0,
-  username: null,
-};
-
-// ── API Client ────────────────────────────────────────────────────
-
-async function api(method, path, body = null) {
-  const opts = {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'same-origin', // Send session cookie
-  };
-  if (body) opts.body = JSON.stringify(body);
-
-  const res = await fetch(`/v1${path}`, opts);
-  if (res.status === 401) {
-    // Session expired — redirect to login
-    window.location.href = '/login';
-    return;
-  }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.detail || err.error || `HTTP ${res.status}`);
-  }
-  return res.json();
+// ── API ───────────────────────────────────────────
+async function api(m, p, b) {
+  const o = { method: m, headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' };
+  if (b) o.body = JSON.stringify(b);
+  const r = await fetch(`/v1${p}`, o);
+  if (r.status === 401) return void (location.href = '/login');
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || e.error || `HTTP ${r.status}`); }
+  return r.json();
 }
 
-async function apiHealth(path) {
-  const res = await fetch(path);
-  return res.json();
-}
-
-// ── Init ──────────────────────────────────────────────────────────
-
-document.addEventListener('DOMContentLoaded', () => {
-  loadCurrentUser();
+// ── Init ──────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadUser();
   checkHealth();
-  loadDashboard();
+  loadDash();
   loadContainers();
 });
 
-async function loadCurrentUser() {
+async function loadUser() {
   try {
-    const res = await fetch('/auth/me', { credentials: 'same-origin' });
-    if (res.ok) {
-      const data = await res.json();
-      state.username = data.username;
-      const userEl = document.getElementById('current-user');
-      if (userEl) userEl.textContent = data.username;
-    } else {
-      window.location.href = '/login';
-    }
-  } catch {
-    // Server might be down
-  }
+    const r = await fetch('/auth/me', { credentials: 'same-origin' });
+    if (!r.ok) return void (location.href = '/login');
+    const d = await r.json();
+    S.user = d.username;
+    document.getElementById('current-user').textContent = d.username;
+    document.getElementById('user-avatar').textContent = d.username[0].toUpperCase();
+  } catch {}
 }
 
 async function handleLogout() {
-  try {
-    await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
-  } catch { /* ignore */ }
-  window.location.href = '/login';
+  await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+  location.href = '/login';
 }
 
-function saveApiKey(val) {
-  // API key is still useful for external tools — save to localStorage
-  localStorage.setItem('memoclaw_api_key', val);
-  toast('API key saved (for external tools)', 'success');
+// ── Navigation ────────────────────────────────────
+function nav(v) {
+  S.view = v;
+  document.querySelectorAll('.view').forEach(el => el.classList.add('hidden'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  const sec = document.getElementById(`v-${v}`);
+  if (sec) { sec.classList.remove('hidden'); sec.classList.add('animate-fade-in'); }
+  const btn = document.querySelector(`[data-v="${v}"]`);
+  if (btn) btn.classList.add('active');
+  ({ dashboard: loadDash, memories: loadMemories, documents: loadDocs, graph: loadGraph })[v]?.();
 }
 
-// ── Navigation ────────────────────────────────────────────────────
-
-function switchView(view) {
-  state.currentView = view;
-  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  document.getElementById(`view-${view}`).classList.add('active');
-  document.querySelector(`[data-view="${view}"]`).classList.add('active');
-
-  // Load view data
-  switch (view) {
-    case 'dashboard': loadDashboard(); break;
-    case 'memories': loadMemories(); break;
-    case 'documents': loadDocuments(); break;
-    case 'graph': loadGraph(); break;
-    case 'profiles': break;
-    case 'search': break;
-  }
-}
-
-// ── Health ─────────────────────────────────────────────────────────
-
+// ── Health ────────────────────────────────────────
 async function checkHealth() {
-  const badge = document.getElementById('health-status');
+  const el = document.getElementById('health-status');
   try {
-    const data = await apiHealth('/health');
-    badge.className = 'health-badge ok';
-    badge.innerHTML = '<span class="health-dot"></span> Connected';
+    await (await fetch('/health')).json();
+    el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span><span>Connected</span>';
   } catch {
-    badge.className = 'health-badge error';
-    badge.innerHTML = '<span class="health-dot"></span> Offline';
+    el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-red-400"></span><span>Offline</span>';
   }
 }
 
-// ── Containers ────────────────────────────────────────────────────
-
+// ── Containers ────────────────────────────────────
 async function loadContainers() {
   try {
-    // Get containers from memories
-    const mems = await api('GET', '/memories?limit=200');
+    const [m, d] = await Promise.all([api('GET', '/memories?limit=200'), api('GET', '/documents?limit=200')]);
     const tags = new Set();
-    (mems.memories || []).forEach(m => { if (m.containerTag) tags.add(m.containerTag); });
-
-    // Also from documents
-    const docs = await api('GET', '/documents?limit=200');
-    (docs.documents || []).forEach(d => { if (d.containerTag) tags.add(d.containerTag); });
-
-    state.containers = [...tags].sort();
-    populateContainerSelects();
-  } catch {
-    // Ignore — probably no API key yet
-  }
-}
-
-function populateContainerSelects() {
-  const selects = [
-    'memories-container-filter', 'graph-container-filter',
-    'profile-selector', 'search-container',
-  ];
-  selects.forEach(id => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    const current = el.value;
-    const firstOption = el.options[0].outerHTML;
-    el.innerHTML = firstOption;
-    state.containers.forEach(tag => {
-      const opt = document.createElement('option');
-      opt.value = tag;
-      opt.textContent = tag;
-      el.appendChild(opt);
+    (m.memories || []).forEach(x => x.containerTag && tags.add(x.containerTag));
+    (d.documents || []).forEach(x => x.containerTag && tags.add(x.containerTag));
+    S.containers = [...tags].sort();
+    ['f-mem-container', 'f-graph-container', 'f-profile', 'f-search-container'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const first = id === 'f-profile' ? '<option value="">Select container…</option>' : '<option value="">All containers</option>';
+      el.innerHTML = first + S.containers.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
     });
-    el.value = current;
-  });
+  } catch {}
 }
 
-// ── Dashboard ─────────────────────────────────────────────────────
-
-async function loadDashboard() {
+// ── Dashboard ─────────────────────────────────────
+async function loadDash() {
   try {
-    const [mems, docs] = await Promise.all([
-      api('GET', '/memories?limit=5'),
-      api('GET', '/documents?limit=5'),
-    ]);
+    const [m, d] = await Promise.all([api('GET', '/memories?limit=5'), api('GET', '/documents?limit=5')]);
+    document.getElementById('s-mem').textContent = m.total || 0;
+    document.getElementById('s-doc').textContent = d.total || 0;
+    document.getElementById('s-con').textContent = S.containers.length;
+    document.getElementById('s-pro').textContent = S.containers.length;
 
-    document.getElementById('stat-memories').textContent = mems.total || 0;
-    document.getElementById('stat-documents').textContent = docs.total || 0;
-    document.getElementById('stat-containers').textContent = state.containers.length;
-    document.getElementById('stat-profiles').textContent = state.containers.length;
-
-    // Recent memories
-    const recentMems = document.getElementById('recent-memories');
-    if (mems.memories.length === 0) {
-      recentMems.innerHTML = '<div class="empty-state">No memories yet. Add some documents!</div>';
-    } else {
-      recentMems.innerHTML = mems.memories.map(m => `
-        <div class="card" onclick="showMemoryDetail('${m.id}')">
-          <div class="card-header">
-            <span class="card-type ${m.type}">${m.type}</span>
-            ${m.containerTag ? `<span class="card-container-tag">${m.containerTag}</span>` : ''}
+    const rm = document.getElementById('recent-mem');
+    rm.innerHTML = (m.memories || []).length === 0 ? '<div class="empty">No memories yet</div>'
+      : (m.memories || []).map(x => `
+        <div class="px-5 py-3 hover:bg-white/[0.02] cursor-pointer transition-colors" onclick="openMemDrawer('${x.id}')">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="badge badge-${x.type}">${x.type}</span>
+            ${x.containerTag ? `<span class="text-[10px] text-gray-600 bg-white/[0.04] px-1.5 py-0.5 rounded">${esc(x.containerTag)}</span>` : ''}
+            <span class="ml-auto text-[10px] text-gray-600">${ago(x.createdAt)}</span>
           </div>
-          <div class="card-content">${escapeHtml(m.memory)}</div>
-          <div class="card-meta"><span>${timeAgo(m.createdAt)}</span></div>
-        </div>
-      `).join('');
-    }
+          <p class="text-[13px] text-gray-300 leading-relaxed line-clamp-2">${esc(x.memory)}</p>
+        </div>`).join('');
 
-    // Recent documents
-    const recentDocs = document.getElementById('recent-documents');
-    if (docs.documents.length === 0) {
-      recentDocs.innerHTML = '<div class="empty-state">No documents yet</div>';
-    } else {
-      recentDocs.innerHTML = docs.documents.map(d => `
-        <div class="card" onclick="showDocumentDetail('${d.id}')">
-          <div class="card-header">
-            <span class="card-type ${d.status}">${d.status}</span>
-            ${d.containerTag ? `<span class="card-container-tag">${d.containerTag}</span>` : ''}
+    const rd = document.getElementById('recent-doc');
+    rd.innerHTML = (d.documents || []).length === 0 ? '<div class="empty">No documents yet</div>'
+      : (d.documents || []).map(x => `
+        <div class="px-5 py-3 hover:bg-white/[0.02] cursor-pointer transition-colors" onclick="openDocDrawer('${x.id}')">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="badge badge-${x.status}">${x.status}</span>
+            ${x.containerTag ? `<span class="text-[10px] text-gray-600 bg-white/[0.04] px-1.5 py-0.5 rounded">${esc(x.containerTag)}</span>` : ''}
+            <span class="ml-auto text-[10px] text-gray-600">${ago(x.createdAt)}</span>
           </div>
-          <div class="card-content">${escapeHtml(truncate(d.content, 150))}</div>
-          <div class="card-meta"><span>${timeAgo(d.createdAt)}</span></div>
-        </div>
-      `).join('');
-    }
-  } catch (e) {
-    console.error('Dashboard load error:', e);
-  }
+          <p class="text-[13px] text-gray-300 leading-relaxed line-clamp-2">${esc(trunc(x.content, 120))}</p>
+        </div>`).join('');
+  } catch (e) { console.error(e); }
 }
 
-// ── Memories View ─────────────────────────────────────────────────
-
+// ── Memories ──────────────────────────────────────
 async function loadMemories() {
-  const container = document.getElementById('memories-container-filter').value;
-  const list = document.getElementById('memories-list');
-  list.innerHTML = '<div class="empty-state"><span class="spinner"></span></div>';
-
+  const el = document.getElementById('mem-list');
+  el.innerHTML = '<div class="p-12 text-center"><span class="spinner"></span></div>';
   try {
-    let url = `/memories?limit=50&offset=${state.memoriesPage * 50}`;
-    if (container) url += `&container_tag=${encodeURIComponent(container)}`;
-
+    const ct = document.getElementById('f-mem-container').value;
+    const tp = document.getElementById('f-mem-type').value;
+    let url = `/memories?limit=50&offset=${S.mPage * 50}`;
+    if (ct) url += `&container_tag=${encodeURIComponent(ct)}`;
     const data = await api('GET', url);
-    const typeFilter = document.getElementById('memories-type-filter').value;
-    let memories = data.memories || [];
-    if (typeFilter) memories = memories.filter(m => m.type === typeFilter);
-
-    if (memories.length === 0) {
-      list.innerHTML = '<div class="empty-state">No memories found</div>';
-      return;
-    }
-
-    list.innerHTML = memories.map(m => `
-      <div class="card" onclick="showMemoryDetail('${m.id}')">
-        <div class="card-header">
-          <span class="card-type ${m.type}">${m.type}</span>
-          <div style="display:flex;gap:8px;align-items:center">
-            ${m.containerTag ? `<span class="card-container-tag">${escapeHtml(m.containerTag)}</span>` : ''}
-            <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();forgetMemory('${m.id}')">Forget</button>
-          </div>
+    let list = data.memories || [];
+    if (tp) list = list.filter(m => m.type === tp);
+    if (!list.length) { el.innerHTML = '<div class="empty">No memories found</div>'; return; }
+    el.innerHTML = list.map(m => `
+      <div class="mem-row" onclick="openMemDrawer('${m.id}')">
+        <div class="flex items-center gap-2 mb-1.5">
+          <span class="badge badge-${m.type}">${m.type}</span>
+          ${m.containerTag ? `<span class="text-[10px] text-gray-600 bg-white/[0.04] px-1.5 py-0.5 rounded">${esc(m.containerTag)}</span>` : ''}
+          ${m.isLatest ? '<span class="text-[10px] text-emerald-500">● latest</span>' : '<span class="text-[10px] text-gray-600">○ old</span>'}
+          <span class="ml-auto text-[10px] text-gray-600">${ago(m.createdAt)}</span>
+          <button class="btn-danger opacity-0 group-hover:opacity-100" onclick="event.stopPropagation();forgetMem('${m.id}')">Forget</button>
         </div>
-        <div class="card-content">${escapeHtml(m.memory)}</div>
-        <div class="card-meta">
-          <span>${timeAgo(m.createdAt)}</span>
-          ${m.isLatest ? '<span style="color:var(--green)">● latest</span>' : '<span style="color:var(--text-muted)">○ superseded</span>'}
-        </div>
-      </div>
-    `).join('');
-  } catch (e) {
-    list.innerHTML = `<div class="empty-state" style="color:var(--red)">Error: ${escapeHtml(e.message)}</div>`;
-  }
+        <p class="text-[13px] text-gray-300 leading-relaxed">${esc(m.memory)}</p>
+      </div>`).join('');
+  } catch (e) { el.innerHTML = `<div class="empty text-red-400">Error: ${esc(e.message)}</div>`; }
 }
 
-async function forgetMemory(id) {
+async function forgetMem(id) {
   if (!confirm('Forget this memory?')) return;
-  try {
-    await api('DELETE', `/memories/${id}`);
-    toast('Memory forgotten', 'success');
-    loadMemories();
-  } catch (e) {
-    toast(`Error: ${e.message}`, 'error');
-  }
+  try { await api('DELETE', `/memories/${id}`); toast('Memory forgotten'); loadMemories(); } catch (e) { toast(e.message, 'error'); }
 }
 
-// ── Documents View ────────────────────────────────────────────────
-
-async function loadDocuments() {
-  const statusFilter = document.getElementById('docs-status-filter').value;
-  const list = document.getElementById('documents-list');
-  list.innerHTML = '<div class="empty-state"><span class="spinner"></span></div>';
-
+// ── Documents ─────────────────────────────────────
+async function loadDocs() {
+  const el = document.getElementById('doc-list');
+  el.innerHTML = '<div class="p-12 text-center"><span class="spinner"></span></div>';
   try {
-    let url = `/documents?limit=50&offset=${state.documentsPage * 50}`;
-    if (statusFilter) url += `&status=${statusFilter}`;
-
+    const st = document.getElementById('f-doc-status').value;
+    let url = `/documents?limit=50&offset=${S.dPage * 50}`;
+    if (st) url += `&status=${st}`;
     const data = await api('GET', url);
-    const docs = data.documents || [];
-
-    if (docs.length === 0) {
-      list.innerHTML = '<div class="empty-state">No documents found</div>';
-      return;
-    }
-
-    list.innerHTML = docs.map(d => `
-      <div class="card" onclick="showDocumentDetail('${d.id}')">
-        <div class="card-header">
-          <span class="card-type ${d.status}">${d.status}</span>
-          <div style="display:flex;gap:8px;align-items:center">
-            ${d.containerTag ? `<span class="card-container-tag">${escapeHtml(d.containerTag)}</span>` : ''}
-            <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteDocument('${d.id}')">Delete</button>
-          </div>
+    const list = data.documents || [];
+    if (!list.length) { el.innerHTML = '<div class="empty">No documents found</div>'; return; }
+    el.innerHTML = list.map(d => `
+      <div class="mem-row" onclick="openDocDrawer('${d.id}')">
+        <div class="flex items-center gap-2 mb-1.5">
+          <span class="badge badge-${d.status}">${d.status}</span>
+          ${d.containerTag ? `<span class="text-[10px] text-gray-600 bg-white/[0.04] px-1.5 py-0.5 rounded">${esc(d.containerTag)}</span>` : ''}
+          <span class="ml-auto text-[10px] text-gray-600">${ago(d.createdAt)}</span>
+          <button class="btn-danger opacity-0 group-hover:opacity-100" onclick="event.stopPropagation();delDoc('${d.id}')">Delete</button>
         </div>
-        <div class="card-content">${escapeHtml(truncate(d.content, 200))}</div>
-        <div class="card-meta">
-          <span>${timeAgo(d.createdAt)}</span>
-          ${d.customId ? `<span>ID: ${escapeHtml(d.customId)}</span>` : ''}
-        </div>
-      </div>
-    `).join('');
-  } catch (e) {
-    list.innerHTML = `<div class="empty-state" style="color:var(--red)">Error: ${escapeHtml(e.message)}</div>`;
-  }
+        <p class="text-[13px] text-gray-300 leading-relaxed line-clamp-3">${esc(trunc(d.content, 200))}</p>
+      </div>`).join('');
+  } catch (e) { el.innerHTML = `<div class="empty text-red-400">Error: ${esc(e.message)}</div>`; }
 }
 
-async function deleteDocument(id) {
-  if (!confirm('Delete this document and all its memories?')) return;
-  try {
-    await fetch(`/v1/documents/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${state.apiKey}` },
-    });
-    toast('Document deleted', 'success');
-    loadDocuments();
-  } catch (e) {
-    toast(`Error: ${e.message}`, 'error');
-  }
+async function delDoc(id) {
+  if (!confirm('Delete this document?')) return;
+  try { await fetch(`/v1/documents/${id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' }); toast('Document deleted'); loadDocs(); } catch (e) { toast(e.message, 'error'); }
 }
 
-// ── Graph View ────────────────────────────────────────────────────
-
-let graphData = { nodes: [], edges: [] };
-let graphTransform = { x: 0, y: 0, scale: 1 };
-let graphDrag = null;
-let graphHover = null;
+// ── Graph ─────────────────────────────────────────
+let G = { nodes: [], edges: [] }, GT = { x: 0, y: 0, s: 1 }, drag = null, hover = null;
 
 async function loadGraph() {
-  const container = document.getElementById('graph-container-filter').value;
   try {
-    let url = `/memories?limit=200`;
-    if (container) url += `&container_tag=${encodeURIComponent(container)}`;
+    const ct = document.getElementById('f-graph-container').value;
+    let url = '/memories?limit=200';
+    if (ct) url += `&container_tag=${encodeURIComponent(ct)}`;
     const data = await api('GET', url);
-    const memories = data.memories || [];
+    const mems = data.memories || [];
+    const empty = document.getElementById('graph-empty');
+    if (!mems.length) { empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden');
 
-    // Build graph
-    graphData.nodes = memories.map((m, i) => ({
-      id: m.id,
-      label: truncate(m.memory, 60),
-      full: m.memory,
-      type: m.type,
-      containerTag: m.containerTag,
-      isLatest: m.isLatest,
-      // Arrange in a force-like layout (simple circular for now)
-      x: 400 + 250 * Math.cos((2 * Math.PI * i) / memories.length + Math.random() * 0.3),
-      y: 300 + 200 * Math.sin((2 * Math.PI * i) / memories.length + Math.random() * 0.3),
-      radius: 8,
-    }));
-
-    // Fetch edges from the API (via search similarity for related pairs)
-    graphData.edges = [];
-
-    // Simple similarity-based edges: connect memories from same container with random subset
-    const byContainer = {};
-    memories.forEach(m => {
-      if (!m.containerTag) return;
-      (byContainer[m.containerTag] = byContainer[m.containerTag] || []).push(m.id);
+    const W = 800, H = 600;
+    G.nodes = mems.map((m, i) => {
+      const angle = (2 * Math.PI * i) / mems.length;
+      const r = 150 + Math.random() * 120;
+      return { id: m.id, label: trunc(m.memory, 50), full: m.memory, type: m.type, tag: m.containerTag, latest: m.isLatest,
+        x: W / 2 + r * Math.cos(angle), y: H / 2 + r * Math.sin(angle), r: 6 + Math.random() * 4 };
     });
-    Object.values(byContainer).forEach(ids => {
-      for (let i = 0; i < ids.length - 1 && i < 30; i++) {
-        graphData.edges.push({
-          source: ids[i],
-          target: ids[i + 1],
-          type: ['extends', 'updates', 'derives'][i % 3],
-        });
-      }
-    });
-
+    // Edges by container adjacency
+    G.edges = [];
+    const byC = {};
+    mems.forEach(m => { if (m.containerTag) (byC[m.containerTag] = byC[m.containerTag] || []).push(m.id); });
+    Object.values(byC).forEach(ids => { for (let i = 0; i < ids.length - 1 && i < 30; i++) G.edges.push({ s: ids[i], t: ids[i + 1], type: ['extends', 'updates', 'derives'][i % 3] }); });
     drawGraph();
-  } catch (e) {
-    console.error('Graph load error:', e);
-  }
+  } catch (e) { console.error(e); }
 }
 
 function drawGraph() {
-  const canvas = document.getElementById('graph-canvas');
-  const ctx = canvas.getContext('2d');
-  const rect = canvas.parentElement.getBoundingClientRect();
-  canvas.width = rect.width * window.devicePixelRatio;
-  canvas.height = rect.height * window.devicePixelRatio;
-  canvas.style.width = rect.width + 'px';
-  canvas.style.height = rect.height + 'px';
-  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-
+  const c = document.getElementById('graph-canvas'), ctx = c.getContext('2d');
+  const rect = c.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  c.width = rect.width * dpr; c.height = rect.height * dpr;
+  c.style.width = rect.width + 'px'; c.style.height = rect.height + 'px';
+  ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, rect.width, rect.height);
-  ctx.save();
-  ctx.translate(graphTransform.x, graphTransform.y);
-  ctx.scale(graphTransform.scale, graphTransform.scale);
+  ctx.save(); ctx.translate(GT.x, GT.y); ctx.scale(GT.s, GT.s);
 
-  const colors = {
-    fact: '#7c5cff',
-    preference: '#fbbf24',
-    episode: '#60a5fa',
-  };
-  const edgeColors = {
-    updates: '#f87171',
-    extends: '#34d399',
-    derives: '#fb923c',
-  };
+  const col = { fact: '#8b5cf6', preference: '#fbbf24', episode: '#38bdf8' };
+  const ecol = { updates: '#f87171', extends: '#34d399', derives: '#fb923c' };
+  const nm = {}; G.nodes.forEach(n => nm[n.id] = n);
 
-  // Draw edges
-  const nodeMap = {};
-  graphData.nodes.forEach(n => nodeMap[n.id] = n);
-
-  graphData.edges.forEach(e => {
-    const s = nodeMap[e.source];
-    const t = nodeMap[e.target];
-    if (!s || !t) return;
-
-    ctx.beginPath();
-    ctx.moveTo(s.x, s.y);
-    ctx.lineTo(t.x, t.y);
-    ctx.strokeStyle = edgeColors[e.type] || '#2a2a3a';
-    ctx.globalAlpha = 0.3;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
+  // Edges
+  G.edges.forEach(e => {
+    const a = nm[e.s], b = nm[e.t];
+    if (!a || !b) return;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = ecol[e.type] || '#1a1a2a'; ctx.globalAlpha = 0.2; ctx.lineWidth = 1; ctx.stroke(); ctx.globalAlpha = 1;
   });
 
-  // Draw nodes
-  graphData.nodes.forEach(n => {
-    const isHovered = graphHover && graphHover.id === n.id;
-    const r = isHovered ? n.radius * 1.5 : n.radius;
-
-    // Glow
-    if (isHovered) {
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, r + 6, 0, Math.PI * 2);
-      ctx.fillStyle = colors[n.type] + '33';
-      ctx.fill();
-    }
-
-    // Node
-    ctx.beginPath();
-    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = colors[n.type] || '#7c5cff';
-    ctx.fill();
-
-    if (!n.isLatest) {
-      ctx.strokeStyle = '#555577';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([2, 2]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    // Label (only if zoomed enough or hovered)
-    if (graphTransform.scale > 0.7 || isHovered) {
-      ctx.font = `${isHovered ? 12 : 10}px -apple-system, sans-serif`;
-      ctx.fillStyle = isHovered ? '#e8e8f0' : '#8888aa';
-      ctx.textAlign = 'center';
-      ctx.fillText(n.label, n.x, n.y + r + 14);
+  // Nodes
+  G.nodes.forEach(n => {
+    const h = hover && hover.id === n.id;
+    const r = h ? n.r * 1.6 : n.r;
+    if (h) { ctx.beginPath(); ctx.arc(n.x, n.y, r + 8, 0, Math.PI * 2); ctx.fillStyle = (col[n.type] || '#8b5cf6') + '22'; ctx.fill(); }
+    ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fillStyle = col[n.type] || '#8b5cf6'; ctx.fill();
+    if (!n.latest) { ctx.strokeStyle = '#333'; ctx.lineWidth = 0.5; ctx.setLineDash([2, 2]); ctx.stroke(); ctx.setLineDash([]); }
+    if (GT.s > 0.6 || h) {
+      ctx.font = `${h ? 11 : 9}px Inter, system-ui, sans-serif`;
+      ctx.fillStyle = h ? '#e2e8f0' : '#6b7280'; ctx.textAlign = 'center';
+      ctx.fillText(n.label, n.x, n.y + r + 13);
     }
   });
-
   ctx.restore();
-
-  // Empty state
-  if (graphData.nodes.length === 0) {
-    ctx.font = '14px -apple-system, sans-serif';
-    ctx.fillStyle = '#555577';
-    ctx.textAlign = 'center';
-    ctx.fillText('No memories to visualize. Add some documents first!', rect.width / 2, rect.height / 2);
-  }
 }
 
-// Graph interaction
-(function initGraphInteraction() {
-  const canvas = document.getElementById('graph-canvas');
-  if (!canvas) return;
-
-  canvas.addEventListener('mousedown', (e) => {
-    graphDrag = { startX: e.clientX - graphTransform.x, startY: e.clientY - graphTransform.y };
-  });
-
-  canvas.addEventListener('mousemove', (e) => {
-    if (graphDrag) {
-      graphTransform.x = e.clientX - graphDrag.startX;
-      graphTransform.y = e.clientY - graphDrag.startY;
-      drawGraph();
-      return;
-    }
-
-    // Hover detection
-    const rect = canvas.getBoundingClientRect();
-    const mx = (e.clientX - rect.left - graphTransform.x) / graphTransform.scale;
-    const my = (e.clientY - rect.top - graphTransform.y) / graphTransform.scale;
-
+// Graph interactions
+(function () {
+  const c = document.getElementById('graph-canvas');
+  if (!c) return;
+  c.addEventListener('mousedown', e => { drag = { sx: e.clientX - GT.x, sy: e.clientY - GT.y }; });
+  c.addEventListener('mousemove', e => {
+    if (drag) { GT.x = e.clientX - drag.sx; GT.y = e.clientY - drag.sy; drawGraph(); return; }
+    const rect = c.getBoundingClientRect();
+    const mx = (e.clientX - rect.left - GT.x) / GT.s, my = (e.clientY - rect.top - GT.y) / GT.s;
     let found = null;
-    for (const n of graphData.nodes) {
-      const dx = mx - n.x;
-      const dy = my - n.y;
-      if (dx * dx + dy * dy < 200) { found = n; break; }
-    }
-
-    if (found !== graphHover) {
-      graphHover = found;
-      drawGraph();
-
-      const tooltip = document.getElementById('graph-tooltip');
+    for (const n of G.nodes) { if ((mx - n.x) ** 2 + (my - n.y) ** 2 < 200) { found = n; break; } }
+    if (found !== hover) {
+      hover = found; drawGraph();
+      const tip = document.getElementById('graph-tip');
       if (found) {
-        tooltip.classList.remove('hidden');
-        tooltip.style.left = (e.clientX - rect.left + 12) + 'px';
-        tooltip.style.top = (e.clientY - rect.top - 10) + 'px';
-        tooltip.innerHTML = `
-          <div><strong>${escapeHtml(found.full)}</strong></div>
-          <div style="margin-top:4px;font-size:11px;color:var(--text-muted)">
-            Type: ${found.type} · ${found.containerTag || 'no container'}
-          </div>`;
-      } else {
-        tooltip.classList.add('hidden');
-      }
+        tip.classList.remove('hidden');
+        tip.style.left = (e.clientX - rect.left + 14) + 'px'; tip.style.top = (e.clientY - rect.top - 8) + 'px';
+        tip.innerHTML = `<p class="font-medium text-gray-200 mb-1">${esc(found.full)}</p><p class="text-gray-500">${found.type} · ${found.tag || 'untagged'}</p>`;
+      } else tip.classList.add('hidden');
     }
   });
-
-  canvas.addEventListener('mouseup', () => { graphDrag = null; });
-  canvas.addEventListener('mouseleave', () => { graphDrag = null; });
-
-  canvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    graphTransform.scale = Math.max(0.2, Math.min(5, graphTransform.scale * delta));
-    drawGraph();
-  }, { passive: false });
-
-  // Redraw on resize
-  window.addEventListener('resize', () => {
-    if (state.currentView === 'graph') drawGraph();
-  });
+  c.addEventListener('mouseup', () => { drag = null; });
+  c.addEventListener('mouseleave', () => { drag = null; });
+  c.addEventListener('wheel', e => { e.preventDefault(); GT.s = Math.max(0.2, Math.min(5, GT.s * (e.deltaY > 0 ? 0.92 : 1.08))); drawGraph(); }, { passive: false });
+  window.addEventListener('resize', () => { if (S.view === 'graph') drawGraph(); });
 })();
 
-// ── Profiles View ─────────────────────────────────────────────────
-
-async function loadProfile(containerTag) {
-  const detail = document.getElementById('profile-detail');
-  if (!containerTag) {
-    detail.innerHTML = '<div class="empty-state">Select a container to view its profile</div>';
-    return;
-  }
-
-  detail.innerHTML = '<div class="empty-state"><span class="spinner"></span></div>';
-
+// ── Profiles ──────────────────────────────────────
+async function loadProfile(ct) {
+  const el = document.getElementById('profile-out');
+  if (!ct) { el.innerHTML = '<div class="text-sm text-gray-600">Select a container</div>'; return; }
+  el.innerHTML = '<div class="p-8 text-center"><span class="spinner"></span></div>';
   try {
-    const data = await api('POST', '/profile', { containerTag });
-    const p = data.profile;
-
-    let html = '';
-
-    // Static facts
-    html += `
-      <div class="profile-section">
-        <div class="profile-section-header">
-          <h4>📌 Static Facts</h4>
-          <span class="badge">${(p.static || []).length}</span>
+    const d = await api('POST', '/profile', { containerTag: ct });
+    const p = d.profile;
+    el.innerHTML = `
+      <div class="card !p-0 mb-4 overflow-hidden">
+        <div class="px-5 py-3 border-b border-white/[0.06] flex items-center gap-2">
+          <svg class="w-4 h-4 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
+          <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Static Facts</h4>
+          <span class="text-[10px] bg-brand-400/10 text-brand-400 px-1.5 rounded font-bold">${(p.static||[]).length}</span>
         </div>
-        <div class="profile-facts">
-          ${(p.static || []).length === 0
-            ? '<div class="empty-state" style="padding:16px">No static facts yet</div>'
-            : (p.static || []).map(f => `<div class="profile-fact">${escapeHtml(f)}</div>`).join('')
-          }
+        <div class="px-5 py-2">
+          ${(p.static||[]).length ? (p.static||[]).map(f => `<div class="fact-row"><span class="fact-dot bg-brand-400"></span><span class="text-gray-300">${esc(f)}</span></div>`).join('')
+            : '<p class="py-4 text-xs text-gray-600 text-center">No static facts yet</p>'}
         </div>
-      </div>`;
-
-    // Dynamic facts
-    html += `
-      <div class="profile-section">
-        <div class="profile-section-header">
-          <h4>⚡ Dynamic Context</h4>
-          <span class="badge">${(p.dynamic || []).length}</span>
-        </div>
-        <div class="profile-facts">
-          ${(p.dynamic || []).length === 0
-            ? '<div class="empty-state" style="padding:16px">No dynamic context yet</div>'
-            : (p.dynamic || []).map(f => `<div class="profile-fact dynamic">${escapeHtml(f)}</div>`).join('')
-          }
-        </div>
-      </div>`;
-
-    // Search results (if any)
-    const results = data.searchResults?.results || [];
-    if (results.length > 0) {
-      html += `
-        <div class="profile-section">
-          <div class="profile-section-header">
-            <h4>🔍 Related Memories</h4>
-            <span class="badge">${results.length}</span>
-          </div>
-          <div class="profile-facts">
-            ${results.map(r => `
-              <div class="profile-fact">
-                ${escapeHtml(r.memory)}
-                <span class="card-similarity">${Math.round(r.similarity * 100)}%</span>
-              </div>
-            `).join('')}
-          </div>
-        </div>`;
-    }
-
-    detail.innerHTML = html;
-  } catch (e) {
-    detail.innerHTML = `<div class="empty-state" style="color:var(--red)">Error: ${escapeHtml(e.message)}</div>`;
-  }
-}
-
-// ── Search View ───────────────────────────────────────────────────
-
-async function performSearch() {
-  const query = document.getElementById('search-input').value.trim();
-  if (!query) return;
-
-  const container = document.getElementById('search-container').value;
-  const mode = document.getElementById('search-mode').value;
-  const results = document.getElementById('search-results');
-  results.innerHTML = '<div class="empty-state"><span class="spinner"></span></div>';
-
-  try {
-    const endpoint = mode === 'documents' ? '/search/documents' : '/search/memories';
-    const body = { q: query, limit: 20, searchMode: mode };
-    if (container) body.containerTag = container;
-
-    const data = await api('POST', endpoint, body);
-    const items = data.results || [];
-
-    if (items.length === 0) {
-      results.innerHTML = '<div class="empty-state">No results found</div>';
-      return;
-    }
-
-    results.innerHTML = items.map(r => `
-      <div class="card">
-        <div class="card-header">
-          <div style="display:flex;gap:8px;align-items:center">
-            ${r.type ? `<span class="card-type ${r.type}">${r.type}</span>` : ''}
-            ${r.container_tag ? `<span class="card-container-tag">${escapeHtml(r.container_tag)}</span>` : ''}
-          </div>
-          <span class="card-similarity">${Math.round((r.similarity || 0) * 100)}% match</span>
-        </div>
-        <div class="card-content">${escapeHtml(r.memory || r.content_preview || '')}</div>
-        <div class="card-meta"><span>${timeAgo(r.created_at)}</span></div>
       </div>
-    `).join('');
-  } catch (e) {
-    results.innerHTML = `<div class="empty-state" style="color:var(--red)">Error: ${escapeHtml(e.message)}</div>`;
-  }
+      <div class="card !p-0 overflow-hidden">
+        <div class="px-5 py-3 border-b border-white/[0.06] flex items-center gap-2">
+          <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Dynamic Context</h4>
+          <span class="text-[10px] bg-cyan-400/10 text-cyan-400 px-1.5 rounded font-bold">${(p.dynamic||[]).length}</span>
+        </div>
+        <div class="px-5 py-2">
+          ${(p.dynamic||[]).length ? (p.dynamic||[]).map(f => `<div class="fact-row"><span class="fact-dot bg-cyan-400"></span><span class="text-gray-300">${esc(f)}</span></div>`).join('')
+            : '<p class="py-4 text-xs text-gray-600 text-center">No dynamic context yet</p>'}
+        </div>
+      </div>`;
+  } catch (e) { el.innerHTML = `<div class="empty text-red-400">${esc(e.message)}</div>`; }
 }
 
-// ── Modals ─────────────────────────────────────────────────────────
+// ── Search ────────────────────────────────────────
+async function doSearch() {
+  const q = document.getElementById('search-q').value.trim();
+  if (!q) return;
+  const el = document.getElementById('search-out');
+  el.innerHTML = '<div class="p-8 text-center"><span class="spinner"></span></div>';
+  try {
+    const ct = document.getElementById('f-search-container').value;
+    const mode = document.getElementById('f-search-mode').value;
+    const ep = mode === 'documents' ? '/search/documents' : '/search/memories';
+    const body = { q, limit: 20, searchMode: mode };
+    if (ct) body.containerTag = ct;
+    const data = await api('POST', ep, body);
+    const items = data.results || [];
+    if (!items.length) { el.innerHTML = '<div class="empty">No results</div>'; return; }
+    el.innerHTML = items.map(r => `
+      <div class="mem-row">
+        <div class="flex items-center gap-2 mb-1.5">
+          ${r.type ? `<span class="badge badge-${r.type}">${r.type}</span>` : ''}
+          ${r.container_tag ? `<span class="text-[10px] text-gray-600 bg-white/[0.04] px-1.5 py-0.5 rounded">${esc(r.container_tag)}</span>` : ''}
+          <span class="ml-auto sim-score ${r.similarity > 0.6 ? 'text-emerald-400' : r.similarity > 0.3 ? 'text-amber-400' : 'text-gray-500'}">${Math.round((r.similarity||0)*100)}%</span>
+        </div>
+        <p class="text-[13px] text-gray-300 leading-relaxed">${esc(r.memory || r.content_preview || '')}</p>
+        <p class="text-[10px] text-gray-600 mt-1">${ago(r.created_at)}</p>
+      </div>`).join('');
+  } catch (e) { el.innerHTML = `<div class="empty text-red-400">${esc(e.message)}</div>`; }
+}
 
-function showAddMemoryModal() {
+// ── Modals ─────────────────────────────────────────
+function modalAddMemory() {
   document.getElementById('modal-title').textContent = 'Add Memory';
   document.getElementById('modal-body').innerHTML = `
-    <div class="form-group">
-      <label>Content</label>
-      <textarea id="modal-memory-content" placeholder="Enter a fact, preference, or episode..."></textarea>
-    </div>
-    <div class="form-group">
-      <label>Container Tag</label>
-      <input id="modal-memory-container" placeholder="e.g., user_123" value="">
-    </div>
-    <div class="form-group">
-      <label>Type</label>
-      <select id="modal-memory-type">
-        <option value="fact">Fact</option>
-        <option value="preference">Preference</option>
-        <option value="episode">Episode</option>
-      </select>
-    </div>
-    <div class="form-actions">
-      <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="submitAddMemory()">Add Memory</button>
+    <div class="space-y-3">
+      <div><label class="lbl">Content</label><textarea id="m-content" rows="4" class="inp w-full" placeholder="A fact, preference, or episode…"></textarea></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="lbl">Container</label><input id="m-tag" class="inp w-full" placeholder="user_123"></div>
+        <div><label class="lbl">Type</label><select id="m-type" class="sel w-full"><option value="fact">Fact</option><option value="preference">Preference</option><option value="episode">Episode</option></select></div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="closeModal()" class="btn-ghost">Cancel</button>
+        <button onclick="submitMem()" class="btn-primary">Add Memory</button>
+      </div>
     </div>`;
-  document.getElementById('modal-overlay').classList.remove('hidden');
+  document.getElementById('modal-bg').classList.remove('hidden');
 }
 
-async function submitAddMemory() {
-  const content = document.getElementById('modal-memory-content').value.trim();
-  if (!content) return;
-
-  const body = {
-    content,
-    containerTag: document.getElementById('modal-memory-container').value.trim() || undefined,
-    type: document.getElementById('modal-memory-type').value,
-  };
-
+async function submitMem() {
+  const c = document.getElementById('m-content').value.trim(); if (!c) return;
   try {
-    await api('POST', '/memories', body);
-    closeModal();
-    toast('Memory added', 'success');
-    loadMemories();
-    loadContainers();
-  } catch (e) {
-    toast(`Error: ${e.message}`, 'error');
-  }
+    await api('POST', '/memories', { content: c, containerTag: document.getElementById('m-tag').value.trim() || undefined, type: document.getElementById('m-type').value });
+    closeModal(); toast('Memory added'); loadMemories(); loadContainers();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
-function showAddDocumentModal() {
+function modalAddDoc() {
   document.getElementById('modal-title').textContent = 'Add Document';
   document.getElementById('modal-body').innerHTML = `
-    <div class="form-group">
-      <label>Content</label>
-      <textarea id="modal-doc-content" placeholder="Paste text, a URL, or a conversation..."></textarea>
-    </div>
-    <div class="form-group">
-      <label>Container Tag</label>
-      <input id="modal-doc-container" placeholder="e.g., user_123">
-    </div>
-    <div class="form-group">
-      <label>Entity Context (optional)</label>
-      <input id="modal-doc-context" placeholder="e.g., This is about John, a software engineer">
-    </div>
-    <div class="form-actions">
-      <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="submitAddDocument()">Add Document</button>
+    <div class="space-y-3">
+      <div><label class="lbl">Content</label><textarea id="d-content" rows="5" class="inp w-full" placeholder="Paste text, a conversation, URL…"></textarea></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="lbl">Container</label><input id="d-tag" class="inp w-full" placeholder="user_123"></div>
+        <div><label class="lbl">Entity context (optional)</label><input id="d-ctx" class="inp w-full" placeholder="About John, a dev"></div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="closeModal()" class="btn-ghost">Cancel</button>
+        <button onclick="submitDoc()" class="btn-primary">Add Document</button>
+      </div>
     </div>`;
-  document.getElementById('modal-overlay').classList.remove('hidden');
+  document.getElementById('modal-bg').classList.remove('hidden');
 }
 
-async function submitAddDocument() {
-  const content = document.getElementById('modal-doc-content').value.trim();
-  if (!content) return;
-
-  const body = {
-    content,
-    containerTag: document.getElementById('modal-doc-container').value.trim() || undefined,
-    entityContext: document.getElementById('modal-doc-context').value.trim() || undefined,
-  };
-
+async function submitDoc() {
+  const c = document.getElementById('d-content').value.trim(); if (!c) return;
   try {
-    await api('POST', '/documents', body);
-    closeModal();
-    toast('Document added — processing...', 'success');
-    loadDocuments();
-    loadContainers();
-  } catch (e) {
-    toast(`Error: ${e.message}`, 'error');
-  }
+    await api('POST', '/documents', { content: c, containerTag: document.getElementById('d-tag').value.trim() || undefined, entityContext: document.getElementById('d-ctx').value.trim() || undefined });
+    closeModal(); toast('Document queued for processing'); loadDocs(); loadContainers();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
-function closeModal(event) {
-  if (event && event.target !== event.currentTarget) return;
-  document.getElementById('modal-overlay').classList.add('hidden');
-}
+function closeModal(e) { if (e && e.target !== e.currentTarget) return; document.getElementById('modal-bg').classList.add('hidden'); }
 
-// ── Detail Drawer ─────────────────────────────────────────────────
-
-async function showMemoryDetail(id) {
-  const drawer = document.getElementById('detail-drawer');
-  const body = document.getElementById('drawer-body');
-  document.getElementById('drawer-title').textContent = 'Memory Detail';
-  drawer.classList.remove('hidden');
-  body.innerHTML = '<div class="empty-state"><span class="spinner"></span></div>';
-
+// ── Drawers ───────────────────────────────────────
+async function openMemDrawer(id) {
+  const dw = document.getElementById('drawer'), body = document.getElementById('drawer-body');
+  document.getElementById('drawer-title').textContent = 'Memory';
+  dw.classList.remove('hidden'); body.innerHTML = '<div class="p-8 text-center"><span class="spinner"></span></div>';
   try {
-    // Find memory from local data (already loaded)
-    const mems = await api('GET', `/memories?limit=200`);
-    const mem = (mems.memories || []).find(m => m.id === id);
-    if (!mem) { body.innerHTML = '<div class="empty-state">Memory not found</div>'; return; }
-
+    const all = await api('GET', '/memories?limit=200');
+    const m = (all.memories || []).find(x => x.id === id);
+    if (!m) { body.innerHTML = '<div class="empty">Not found</div>'; return; }
     body.innerHTML = `
-      <div class="detail-section">
-        <h4>Content</h4>
-        <p>${escapeHtml(mem.memory)}</p>
-      </div>
-      <div class="detail-section">
-        <h4>Properties</h4>
-        <div class="tag-list">
-          <span class="tag">Type: ${mem.type}</span>
-          <span class="tag">Latest: ${mem.isLatest ? 'Yes' : 'No'}</span>
-          ${mem.containerTag ? `<span class="tag">Container: ${escapeHtml(mem.containerTag)}</span>` : ''}
+      <div class="space-y-5">
+        <div><p class="text-sm text-gray-300 leading-relaxed">${esc(m.memory)}</p></div>
+        <div class="flex flex-wrap gap-2">
+          <span class="badge badge-${m.type}">${m.type}</span>
+          ${m.isLatest ? '<span class="badge badge-done">latest</span>' : '<span class="badge bg-gray-800 text-gray-500">superseded</span>'}
+          ${m.containerTag ? `<span class="text-[11px] text-gray-500 bg-white/[0.04] px-2 py-0.5 rounded">${esc(m.containerTag)}</span>` : ''}
         </div>
-      </div>
-      <div class="detail-section">
-        <h4>Created</h4>
-        <p>${mem.createdAt ? new Date(mem.createdAt).toLocaleString() : 'Unknown'}</p>
-      </div>
-      ${mem.metadata && Object.keys(mem.metadata).length > 0 ? `
-        <div class="detail-section">
-          <h4>Metadata</h4>
-          <pre style="font-size:12px;color:var(--text-secondary);white-space:pre-wrap">${escapeHtml(JSON.stringify(mem.metadata, null, 2))}</pre>
-        </div>
-      ` : ''}
-      <div class="detail-section" style="margin-top:24px">
-        <button class="btn btn-danger" onclick="forgetMemory('${mem.id}');closeDrawer()">Forget Memory</button>
-      </div>
-    `;
-  } catch (e) {
-    body.innerHTML = `<div class="empty-state" style="color:var(--red)">Error: ${e.message}</div>`;
-  }
+        <div><label class="lbl">Created</label><p class="text-xs text-gray-400">${m.createdAt ? new Date(m.createdAt).toLocaleString() : '—'}</p></div>
+        ${m.metadata && Object.keys(m.metadata).length ? `<div><label class="lbl">Metadata</label><pre class="text-xs text-gray-500 bg-white/[0.02] p-2 rounded overflow-auto">${esc(JSON.stringify(m.metadata, null, 2))}</pre></div>` : ''}
+        <div class="pt-2"><button class="btn-danger" onclick="forgetMem('${m.id}');closeDrawer()">Forget this memory</button></div>
+      </div>`;
+  } catch (e) { body.innerHTML = `<div class="empty text-red-400">${esc(e.message)}</div>`; }
 }
 
-async function showDocumentDetail(id) {
-  const drawer = document.getElementById('detail-drawer');
-  const body = document.getElementById('drawer-body');
-  document.getElementById('drawer-title').textContent = 'Document Detail';
-  drawer.classList.remove('hidden');
-  body.innerHTML = '<div class="empty-state"><span class="spinner"></span></div>';
-
+async function openDocDrawer(id) {
+  const dw = document.getElementById('drawer'), body = document.getElementById('drawer-body');
+  document.getElementById('drawer-title').textContent = 'Document';
+  dw.classList.remove('hidden'); body.innerHTML = '<div class="p-8 text-center"><span class="spinner"></span></div>';
   try {
-    const doc = await api('GET', `/documents/${id}`);
+    const d = await api('GET', `/documents/${id}`);
     body.innerHTML = `
-      <div class="detail-section">
-        <h4>Status</h4>
-        <span class="card-type ${doc.status}">${doc.status}</span>
-      </div>
-      <div class="detail-section">
-        <h4>Content</h4>
-        <p style="white-space:pre-wrap">${escapeHtml(doc.content)}</p>
-      </div>
-      <div class="detail-section">
-        <h4>Properties</h4>
-        <div class="tag-list">
-          ${doc.containerTag ? `<span class="tag">Container: ${escapeHtml(doc.containerTag)}</span>` : ''}
-          ${doc.customId ? `<span class="tag">Custom ID: ${escapeHtml(doc.customId)}</span>` : ''}
-        </div>
-      </div>
-      <div class="detail-section">
-        <h4>Created</h4>
-        <p>${doc.createdAt ? new Date(doc.createdAt).toLocaleString() : 'Unknown'}</p>
-      </div>
-      ${doc.metadata && Object.keys(doc.metadata).length > 0 ? `
-        <div class="detail-section">
-          <h4>Metadata</h4>
-          <pre style="font-size:12px;color:var(--text-secondary);white-space:pre-wrap">${escapeHtml(JSON.stringify(doc.metadata, null, 2))}</pre>
-        </div>
-      ` : ''}
-      <div class="detail-section" style="margin-top:24px">
-        <button class="btn btn-danger" onclick="deleteDocument('${doc.id}');closeDrawer()">Delete Document</button>
-      </div>
-    `;
-  } catch (e) {
-    body.innerHTML = `<div class="empty-state" style="color:var(--red)">Error: ${e.message}</div>`;
-  }
+      <div class="space-y-5">
+        <div class="flex gap-2"><span class="badge badge-${d.status}">${d.status}</span>${d.containerTag ? `<span class="text-[11px] text-gray-500 bg-white/[0.04] px-2 py-0.5 rounded">${esc(d.containerTag)}</span>` : ''}</div>
+        <div><label class="lbl">Content</label><p class="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">${esc(d.content)}</p></div>
+        <div><label class="lbl">Created</label><p class="text-xs text-gray-400">${d.createdAt ? new Date(d.createdAt).toLocaleString() : '—'}</p></div>
+        ${d.metadata && Object.keys(d.metadata).length ? `<div><label class="lbl">Metadata</label><pre class="text-xs text-gray-500 bg-white/[0.02] p-2 rounded overflow-auto">${esc(JSON.stringify(d.metadata, null, 2))}</pre></div>` : ''}
+        <div class="pt-2"><button class="btn-danger" onclick="delDoc('${d.id}');closeDrawer()">Delete document</button></div>
+      </div>`;
+  } catch (e) { body.innerHTML = `<div class="empty text-red-400">${esc(e.message)}</div>`; }
 }
 
-function closeDrawer() {
-  document.getElementById('detail-drawer').classList.add('hidden');
+function closeDrawer() { document.getElementById('drawer').classList.add('hidden'); }
+
+// ── Settings ──────────────────────────────────────
+async function changePw() {
+  const cur = document.getElementById('pw-cur').value, nw = document.getElementById('pw-new').value, cf = document.getElementById('pw-cfm').value;
+  if (!cur || !nw) return toast('Fill all fields', 'error');
+  if (nw !== cf) return toast('Passwords don\'t match', 'error');
+  try {
+    const r = await fetch('/auth/change-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ current_password: cur, new_password: nw }) });
+    if (r.ok) { toast('Password updated'); document.getElementById('pw-cur').value = ''; document.getElementById('pw-new').value = ''; document.getElementById('pw-cfm').value = ''; }
+    else { const d = await r.json(); toast(d.detail || 'Failed', 'error'); }
+  } catch (e) { toast(e.message, 'error'); }
 }
 
-// ── Utilities ─────────────────────────────────────────────────────
-
-function escapeHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
+// ── Utilities ─────────────────────────────────────
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function trunc(s, n) { return !s ? '' : s.length > n ? s.slice(0, n) + '…' : s; }
+function ago(d) {
+  if (!d) return ''; const s = Math.floor((Date.now() - new Date(d)) / 1000);
+  if (s < 60) return 'just now'; if (s < 3600) return `${Math.floor(s/60)}m`; if (s < 86400) return `${Math.floor(s/3600)}h`;
+  if (s < 604800) return `${Math.floor(s/86400)}d`; return new Date(d).toLocaleDateString();
 }
-
-function truncate(str, len) {
-  if (!str) return '';
-  return str.length > len ? str.substring(0, len) + '…' : str;
-}
-
-function timeAgo(dateStr) {
-  if (!dateStr) return '';
-  const date = new Date(dateStr);
-  const now = new Date();
-  const seconds = Math.floor((now - date) / 1000);
-
-  if (seconds < 60) return 'just now';
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
-  return date.toLocaleDateString();
-}
-
-function toast(message, type = 'success') {
-  const el = document.createElement('div');
-  el.className = `toast ${type}`;
-  el.textContent = message;
-  document.body.appendChild(el);
-  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 3000);
+function toast(msg, type = 'success') {
+  const c = document.getElementById('toast-container');
+  const el = document.createElement('div'); el.className = `toast-item ${type}`; el.textContent = msg;
+  c.appendChild(el); setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(() => el.remove(), 300); }, 3000);
 }
 
 // Keyboard shortcuts
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    closeModal();
-    closeDrawer();
-  }
-  // Ctrl+K for search
-  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-    e.preventDefault();
-    switchView('search');
-    document.getElementById('search-input').focus();
-  }
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeModal(); closeDrawer(); }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); nav('search'); document.getElementById('search-q').focus(); }
 });
-
-// ── Settings ──────────────────────────────────────────────────────
-
-async function changePassword() {
-  const current = document.getElementById('current-password').value;
-  const newPw = document.getElementById('new-password').value;
-  const confirm = document.getElementById('confirm-password').value;
-
-  if (!current || !newPw) {
-    toast('Please fill in all fields', 'error');
-    return;
-  }
-  if (newPw !== confirm) {
-    toast('New passwords do not match', 'error');
-    return;
-  }
-  if (newPw.length < 4) {
-    toast('Password must be at least 4 characters', 'error');
-    return;
-  }
-
-  try {
-    const res = await fetch('/auth/change-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({
-        current_password: current,
-        new_password: newPw,
-      }),
-    });
-
-    if (res.ok) {
-      toast('Password updated successfully', 'success');
-      document.getElementById('current-password').value = '';
-      document.getElementById('new-password').value = '';
-      document.getElementById('confirm-password').value = '';
-    } else {
-      const data = await res.json();
-      toast(data.detail || 'Failed to update password', 'error');
-    }
-  } catch (e) {
-    toast(`Error: ${e.message}`, 'error');
-  }
-}
-
-function copyApiKey() {
-  const input = document.getElementById('api-key-display');
-  input.type = 'text';
-  input.select();
-  navigator.clipboard.writeText(input.value).then(() => {
-    toast('API key copied to clipboard', 'success');
-  }).catch(() => {
-    toast('Could not copy — select and copy manually', 'error');
-  });
-  setTimeout(() => { input.type = 'password'; }, 2000);
-}
