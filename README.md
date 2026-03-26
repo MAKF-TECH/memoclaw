@@ -49,15 +49,36 @@ MemoClaw is a persistent memory and context layer for AI agents. It automaticall
 
 MemoClaw includes a built-in dashboard at `http://localhost:8420/`:
 
+- **🔐 Login** — Username/password auth with session cookies
 - **📊 Dashboard** — Overview with stats, recent memories and documents
 - **💭 Memories** — Browse, filter, add, and forget memories
 - **📄 Documents** — Manage ingested documents
 - **🕸️ Graph** — Interactive memory graph visualization (pan, zoom, hover)
 - **👤 Profiles** — View auto-built user profiles (static + dynamic facts)
 - **🔍 Search** — Semantic search across all memories
+- **⚙️ Settings** — Change password, view API key
 - **⌨️ Ctrl+K** — Quick jump to search
 
-Enter your API key in the sidebar to authenticate.
+### Default Login
+
+On first startup, an admin user is created automatically:
+
+| Field | Default | Env Variable |
+|---|---|---|
+| Username | `admin` | `WEBUI_INIT_USER` |
+| Password | `memoclaw` | `WEBUI_INIT_PASSWORD` |
+
+**⚠️ Change the default password** via the Settings page or environment variables.
+
+### User Management
+
+```bash
+# Inside the container
+docker compose exec memoclaw python scripts/manage_users.py create alice s3cret
+docker compose exec memoclaw python scripts/manage_users.py reset admin newpassword
+docker compose exec memoclaw python scripts/manage_users.py list
+docker compose exec memoclaw python scripts/manage_users.py delete alice
+```
 
 ## Quick Start
 
