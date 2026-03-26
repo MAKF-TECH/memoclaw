@@ -18,6 +18,7 @@ from src.api.routes import (
     memories_router,
     search_router,
     profile_router,
+    settings_router,
     health_router,
 )
 from src.webui import webui_router, auth_router
@@ -89,7 +90,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="MemoClaw",
     description="Self-hosted memory engine for AI agents — supermemory.ai compatible",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -110,4 +111,5 @@ app.include_router(documents_router)
 app.include_router(memories_router)
 app.include_router(search_router)
 app.include_router(profile_router)
+app.include_router(settings_router)
 app.include_router(webui_router)
