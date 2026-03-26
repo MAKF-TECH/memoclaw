@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MemoClaw — Memory Dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar -->
+    <nav id="sidebar">
+      <div class="sidebar-header">
+        <h1>🧠 MemoClaw</h1>
+        <span class="version">v0.1.0</span>
+      </div>
+      <div class="nav-items">
+        <button class="nav-item active" data-view="dashboard" onclick="switchView('dashboard')">
+          <span class="nav-icon">📊</span> Dashboard
+        </button>
+        <button class="nav-item" data-view="memories" onclick="switchView('memories')">
+          <span class="nav-icon">💭</span> Memories
+        </button>
+        <button class="nav-item" data-view="documents" onclick="switchView('documents')">
+          <span class="nav-icon">📄</span> Documents
+        </button>
+        <button class="nav-item" data-view="graph" onclick="switchView('graph')">
+          <span class="nav-icon">🕸️</span> Graph
+        </button>
+        <button class="nav-item" data-view="profiles" onclick="switchView('profiles')">
+          <span class="nav-icon">👤</span> Profiles
+        </button>
+        <button class="nav-item" data-view="search" onclick="switchView('search')">
+          <span class="nav-icon">🔍</span> Search
+        </button>
+      </div>
+      <div class="sidebar-footer">
+        <div class="api-key-section">
+          <label>API Key</label>
+          <input type="password" id="apiKeyInput" placeholder="mc-..." 
+                 onchange="saveApiKey(this.value)">
+        </div>
+        <div id="health-status" class="health-badge">
+          <span class="health-dot"></span> Checking...
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main id="content">
+      <!-- Dashboard View -->
+      <div id="view-dashboard" class="view active">
+        <div class="view-header">
+          <h2>Dashboard</h2>
+          <p class="subtitle">Memory engine overview</p>
+        </div>
+        <div class="stats-grid" id="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value" id="stat-memories">—</div>
+            <div class="stat-label">Memories</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-documents">—</div>
+            <div class="stat-label">Documents</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-containers">—</div>
+            <div class="stat-label">Containers</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-profiles">—</div>
+            <div class="stat-label">Profiles</div>
+          </div>
+        </div>
+        <div class="dashboard-panels">
+          <div class="panel">
+            <h3>Recent Memories</h3>
+            <div id="recent-memories" class="panel-content"><div class="empty-state">Loading...</div></div>
+          </div>
+          <div class="panel">
+            <h3>Recent Documents</h3>
+            <div id="recent-documents" class="panel-content"><div class="empty-state">Loading...</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Memories View -->
+      <div id="view-memories" class="view">
+        <div class="view-header">
+          <h2>Memories</h2>
+          <div class="view-actions">
+            <select id="memories-container-filter" onchange="loadMemories()">
+              <option value="">All containers</option>
+            </select>
+            <select id="memories-type-filter" onchange="loadMemories()">
+              <option value="">All types</option>
+              <option value="fact">Facts</option>
+              <option value="preference">Preferences</option>
+              <option value="episode">Episodes</option>
+            </select>
+            <button class="btn btn-primary" onclick="showAddMemoryModal()">+ Add Memory</button>
+          </div>
+        </div>
+        <div id="memories-list" class="card-list"><div class="empty-state">Loading...</div></div>
+        <div id="memories-pagination" class="pagination"></div>
+      </div>
+
+      <!-- Documents View -->
+      <div id="view-documents" class="view">
+        <div class="view-header">
+          <h2>Documents</h2>
+          <div class="view-actions">
+            <select id="docs-status-filter" onchange="loadDocuments()">
+              <option value="">All statuses</option>
+              <option value="done">Done</option>
+              <option value="queued">Queued</option>
+              <option value="error">Error</option>
+            </select>
+            <button class="btn btn-primary" onclick="showAddDocumentModal()">+ Add Document</button>
+          </div>
+        </div>
+        <div id="documents-list" class="card-list"><div class="empty-state">Loading...</div></div>
+        <div id="documents-pagination" class="pagination"></div>
+      </div>
+
+      <!-- Graph View -->
+      <div id="view-graph" class="view">
+        <div class="view-header">
+          <h2>Memory Graph</h2>
+          <div class="view-actions">
+            <select id="graph-container-filter" onchange="loadGraph()">
+              <option value="">All containers</option>
+            </select>
+            <div class="graph-legend">
+              <span class="legend-item"><span class="legend-dot fact"></span> Fact</span>
+              <span class="legend-item"><span class="legend-dot preference"></span> Preference</span>
+              <span class="legend-item"><span class="legend-dot episode"></span> Episode</span>
+              <span class="legend-item"><span class="legend-edge updates"></span> Updates</span>
+              <span class="legend-item"><span class="legend-edge extends"></span> Extends</span>
+              <span class="legend-item"><span class="legend-edge derives"></span> Derives</span>
+            </div>
+          </div>
+        </div>
+        <div id="graph-container" class="graph-canvas">
+          <canvas id="graph-canvas"></canvas>
+          <div id="graph-tooltip" class="graph-tooltip hidden"></div>
+        </div>
+      </div>
+
+      <!-- Profiles View -->
+      <div id="view-profiles" class="view">
+        <div class="view-header">
+          <h2>User Profiles</h2>
+          <div class="view-actions">
+            <select id="profile-selector" onchange="loadProfile(this.value)">
+              <option value="">Select container...</option>
+            </select>
+          </div>
+        </div>
+        <div id="profile-detail" class="profile-content">
+          <div class="empty-state">Select a container to view its profile</div>
+        </div>
+      </div>
+
+      <!-- Search View -->
+      <div id="view-search" class="view">
+        <div class="view-header">
+          <h2>Search Memories</h2>
+        </div>
+        <div class="search-bar">
+          <input type="text" id="search-input" placeholder="Search your memories..."
+                 onkeydown="if(event.key==='Enter') performSearch()">
+          <select id="search-container">
+            <option value="">All containers</option>
+          </select>
+          <select id="search-mode">
+            <option value="hybrid">Hybrid</option>
+            <option value="memories">Memories only</option>
+            <option value="documents">Documents only</option>
+          </select>
+          <button class="btn btn-primary" onclick="performSearch()">Search</button>
+        </div>
+        <div id="search-results" class="card-list">
+          <div class="empty-state">Enter a query to search your memory</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal-overlay" class="modal-overlay hidden" onclick="closeModal(event)">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 id="modal-title">Add</h3>
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Memory Detail Drawer -->
+  <div id="detail-drawer" class="drawer hidden">
+    <div class="drawer-header">
+      <h3 id="drawer-title">Memory Detail</h3>
+      <button class="drawer-close" onclick="closeDrawer()">&times;</button>
+    </div>
+    <div id="drawer-body" class="drawer-body"></div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

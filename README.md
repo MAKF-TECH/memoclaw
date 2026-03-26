@@ -45,6 +45,20 @@ MemoClaw is a persistent memory and context layer for AI agents. It automaticall
 - **Batch operations** — bulk add documents
 - **Docker-first** — single `docker compose up`
 
+## Web UI
+
+MemoClaw includes a built-in dashboard at `http://localhost:8420/`:
+
+- **📊 Dashboard** — Overview with stats, recent memories and documents
+- **💭 Memories** — Browse, filter, add, and forget memories
+- **📄 Documents** — Manage ingested documents
+- **🕸️ Graph** — Interactive memory graph visualization (pan, zoom, hover)
+- **👤 Profiles** — View auto-built user profiles (static + dynamic facts)
+- **🔍 Search** — Semantic search across all memories
+- **⌨️ Ctrl+K** — Quick jump to search
+
+Enter your API key in the sidebar to authenticate.
+
 ## Quick Start
 
 ```bash

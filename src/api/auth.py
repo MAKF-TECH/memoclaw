@@ -9,10 +9,11 @@ from src.config import settings
 class AuthMiddleware(BaseHTTPMiddleware):
     """Bearer token authentication middleware."""
 
-    EXEMPT_PATHS = {"/health", "/health/ready", "/docs", "/openapi.json", "/redoc"}
+    EXEMPT_PATHS = {"/health", "/health/ready", "/docs", "/openapi.json", "/redoc", "/"}
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path in self.EXEMPT_PATHS:
+        path = request.url.path
+        if path in self.EXEMPT_PATHS or path.startswith("/static/"):
             return await call_next(request)
 
         auth_header = request.headers.get("Authorization", "")
