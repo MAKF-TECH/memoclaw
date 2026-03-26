@@ -20,7 +20,7 @@ from src.api.routes import (
     profile_router,
     health_router,
 )
-from src.webui import webui_router
+from src.webui import webui_router, auth_router
 from src.workers import decay_worker
 
 # Configure structlog
@@ -105,6 +105,7 @@ app.add_middleware(AuthMiddleware)
 
 # Routers
 app.include_router(health_router)
+app.include_router(auth_router)
 app.include_router(documents_router)
 app.include_router(memories_router)
 app.include_router(search_router)

@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = Field(default="info")
 
+    # Web UI Auth
+    session_secret: str = Field(default="memoclaw-change-this-secret-key")
+    session_max_age: int = Field(default=86400)  # 24 hours
+    webui_init_user: str = Field(default="admin")
+    webui_init_password: str = Field(default="memoclaw")
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

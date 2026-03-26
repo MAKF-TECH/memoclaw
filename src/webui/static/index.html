@@ -34,12 +34,17 @@
         <button class="nav-item" data-view="search" onclick="switchView('search')">
           <span class="nav-icon">🔍</span> Search
         </button>
+        <button class="nav-item" data-view="settings" onclick="switchView('settings')">
+          <span class="nav-icon">⚙️</span> Settings
+        </button>
       </div>
       <div class="sidebar-footer">
-        <div class="api-key-section">
-          <label>API Key</label>
-          <input type="password" id="apiKeyInput" placeholder="mc-..." 
-                 onchange="saveApiKey(this.value)">
+        <div class="user-section">
+          <div class="user-info">
+            <span class="user-icon">👤</span>
+            <span id="current-user" class="user-name">—</span>
+          </div>
+          <button class="btn btn-sm" onclick="handleLogout()" title="Sign out">↪ Logout</button>
         </div>
         <div id="health-status" class="health-badge">
           <span class="health-dot"></span> Checking...
@@ -183,6 +188,53 @@
         </div>
         <div id="search-results" class="card-list">
           <div class="empty-state">Enter a query to search your memory</div>
+        </div>
+      </div>
+
+      <!-- Settings View -->
+      <div id="view-settings" class="view">
+        <div class="view-header">
+          <h2>Settings</h2>
+          <p class="subtitle">Account and API configuration</p>
+        </div>
+
+        <div class="settings-section">
+          <h3>🔑 Change Password</h3>
+          <div class="settings-card">
+            <div class="form-group">
+              <label for="current-password">Current Password</label>
+              <input type="password" id="current-password" placeholder="••••••••">
+            </div>
+            <div class="form-group">
+              <label for="new-password">New Password</label>
+              <input type="password" id="new-password" placeholder="Enter new password">
+            </div>
+            <div class="form-group">
+              <label for="confirm-password">Confirm New Password</label>
+              <input type="password" id="confirm-password" placeholder="Confirm new password">
+            </div>
+            <button class="btn btn-primary" onclick="changePassword()">Update Password</button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>🔗 API Access</h3>
+          <div class="settings-card">
+            <p style="color:var(--text-secondary);font-size:13px;margin-bottom:12px">
+              Use this API key for external tools (OpenClaw, curl, SDKs). Set via <code>MEMOCLAW_API_KEY</code> env var.
+            </p>
+            <div class="form-group">
+              <label>API Key (for external access)</label>
+              <div style="display:flex;gap:8px">
+                <input type="password" id="api-key-display" readonly placeholder="Configure via .env"
+                       style="flex:1;cursor:text" onfocus="this.type='text'" onblur="this.type='password'">
+                <button class="btn btn-sm" onclick="copyApiKey()">Copy</button>
+              </div>
+            </div>
+            <p style="color:var(--text-muted);font-size:12px;margin-top:4px">
+              Click the field to reveal. API key is set via environment variable.
+            </p>
+          </div>
         </div>
       </div>
     </main>

@@ -5,11 +5,11 @@
 // ── State ─────────────────────────────────────────────────────────
 
 const state = {
-  apiKey: localStorage.getItem('memoclaw_api_key') || '',
   currentView: 'dashboard',
   containers: [],
   memoriesPage: 0,
   documentsPage: 0,
+  username: null,
 };
 
 // ── API Client ────────────────────────────────────────────────────
@@ -19,12 +19,17 @@ async function api(method, path, body = null) {
     method,
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${state.apiKey}`,
     },
+    credentials: 'same-origin', // Send session cookie
   };
   if (body) opts.body = JSON.stringify(body);
 
   const res = await fetch(`/v1${path}`, opts);
+  if (res.status === 401) {
+    // Session expired — redirect to login
+    window.location.href = '/login';
+    return;
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.detail || err.error || `HTTP ${res.status}`);
@@ -40,20 +45,39 @@ async function apiHealth(path) {
 // ── Init ──────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
-  const input = document.getElementById('apiKeyInput');
-  if (state.apiKey) input.value = state.apiKey;
+  loadCurrentUser();
   checkHealth();
   loadDashboard();
   loadContainers();
 });
 
+async function loadCurrentUser() {
+  try {
+    const res = await fetch('/auth/me', { credentials: 'same-origin' });
+    if (res.ok) {
+      const data = await res.json();
+      state.username = data.username;
+      const userEl = document.getElementById('current-user');
+      if (userEl) userEl.textContent = data.username;
+    } else {
+      window.location.href = '/login';
+    }
+  } catch {
+    // Server might be down
+  }
+}
+
+async function handleLogout() {
+  try {
+    await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
+  } catch { /* ignore */ }
+  window.location.href = '/login';
+}
+
 function saveApiKey(val) {
-  state.apiKey = val;
+  // API key is still useful for external tools — save to localStorage
   localStorage.setItem('memoclaw_api_key', val);
-  checkHealth();
-  loadDashboard();
-  loadContainers();
-  toast('API key saved', 'success');
+  toast('API key saved (for external tools)', 'success');
 }
 
 // ── Navigation ────────────────────────────────────────────────────
@@ -134,7 +158,6 @@ function populateContainerSelects() {
 // ── Dashboard ─────────────────────────────────────────────────────
 
 async function loadDashboard() {
-  if (!state.apiKey) return;
   try {
     const [mems, docs] = await Promise.all([
       api('GET', '/memories?limit=5'),
@@ -857,3 +880,60 @@ document.addEventListener('keydown', (e) => {
     document.getElementById('search-input').focus();
   }
 });
+
+// ── Settings ──────────────────────────────────────────────────────
+
+async function changePassword() {
+  const current = document.getElementById('current-password').value;
+  const newPw = document.getElementById('new-password').value;
+  const confirm = document.getElementById('confirm-password').value;
+
+  if (!current || !newPw) {
+    toast('Please fill in all fields', 'error');
+    return;
+  }
+  if (newPw !== confirm) {
+    toast('New passwords do not match', 'error');
+    return;
+  }
+  if (newPw.length < 4) {
+    toast('Password must be at least 4 characters', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch('/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        current_password: current,
+        new_password: newPw,
+      }),
+    });
+
+    if (res.ok) {
+      toast('Password updated successfully', 'success');
+      document.getElementById('current-password').value = '';
+      document.getElementById('new-password').value = '';
+      document.getElementById('confirm-password').value = '';
+    } else {
+      const data = await res.json();
+      toast(data.detail || 'Failed to update password', 'error');
+    }
+  } catch (e) {
+    toast(`Error: ${e.message}`, 'error');
+  }
+}
+
+function copyApiKey() {
+  const input = document.getElementById('api-key-display');
+  input.type = 'text';
+  input.select();
+  navigator.clipboard.writeText(input.value).then(() => {
+    toast('API key copied to clipboard', 'success');
+  }).catch(() => {
+    toast('Could not copy — select and copy manually', 'error');
+  });
+  setTimeout(() => { input.type = 'password'; }, 2000);
+}
