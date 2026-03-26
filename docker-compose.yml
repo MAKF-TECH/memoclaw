@@ -1,0 +1,48 @@
+services:
+  memoclaw:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: memoclaw
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8420}:8420"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - memoclaw-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8420/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: memoclaw-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: memoclaw
+      POSTGRES_PASSWORD: memoclaw
+      POSTGRES_DB: memoclaw
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    networks:
+      - memoclaw-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memoclaw"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+
+networks:
+  memoclaw-net:
+    driver: bridge
