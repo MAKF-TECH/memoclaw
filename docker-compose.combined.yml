@@ -1,0 +1,139 @@
+# Combined OpenClaw + MemoClaw docker-compose
+# Place this alongside your existing .env file
+
+services:
+  openclaw-gateway:
+    build:
+      context: https://github.com/openclaw/openclaw.git#v2026.3.24
+      dockerfile: Dockerfile
+    image: openclaw:v2026.3.24
+    init: true
+    restart: unless-stopped
+    expose:
+      - "18789"
+      - "18790"
+    networks:
+      - nginx-proxy
+    env_file:
+      - .env
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./data/.openclaw:/home/node/.openclaw
+      - ./data/.openclaw/workspace:/home/node/.openclaw/workspace
+    labels:
+      - "npm.description=OpenClaw Gateway"
+      - "npm.header.X-Frame-Options=deny"
+      - "npm.header.X-Content-Type-Options=nosniff"
+    command:
+      [
+        "node",
+        "dist/index.js",
+        "gateway",
+        "--allow-unconfigured",
+        "--bind",
+        "${OPENCLAW_GATEWAY_BIND:-lan}",
+        "--port",
+        "18789",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:18789/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── MemoClaw Memory Engine ────────────────────────────────
+  memoclaw:
+    build:
+      context: https://github.com/MAKF-TECH/memoclaw.git#main
+      dockerfile: Dockerfile
+    container_name: memoclaw
+    restart: unless-stopped
+    expose:
+      - "8420"
+    ports:
+      - "8420:8420"  # Remove this line if you only want access via nginx-proxy
+    networks:
+      - nginx-proxy
+    environment:
+      # API auth
+      MEMOCLAW_API_KEY: ${MEMOCLAW_API_KEY:-mc-changeme}
+      # LLM (uses same provider as OpenClaw if you want)
+      LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-4o-mini}
+      # Embeddings
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-https://api.openai.com/v1}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+      # Database (internal network)
+      DATABASE_URL: postgresql+asyncpg://memoclaw:memoclaw@memoclaw-db:5432/memoclaw
+      # Web UI auth
+      WEBUI_INIT_USER: ${WEBUI_INIT_USER:-admin}
+      WEBUI_INIT_PASSWORD: ${WEBUI_INIT_PASSWORD:-memoclaw}
+      SESSION_SECRET: ${SESSION_SECRET:-change-this-in-production}
+    depends_on:
+      memoclaw-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8420/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "npm.description=MemoClaw Memory Engine"
+
+  memoclaw-db:
+    image: pgvector/pgvector:pg16
+    container_name: memoclaw-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: memoclaw
+      POSTGRES_PASSWORD: memoclaw
+      POSTGRES_DB: memoclaw
+    volumes:
+      - memoclaw-pgdata:/var/lib/postgresql/data
+    networks:
+      - nginx-proxy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memoclaw"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Nginx Proxy Manager ───────────────────────────────────
+  nginx-proxy-manager:
+    image: jc21/nginx-proxy-manager:latest
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"
+    networks:
+      - nginx-proxy
+    environment:
+      - DB_SQLITE_FILE=/data/database.sqlite
+    volumes:
+      - npm-data:/data
+      - npm-letsencrypt:/etc/letsencrypt
+
+volumes:
+  npm-data:
+  npm-letsencrypt:
+  memoclaw-pgdata:
+
+networks:
+  nginx-proxy:
+    external: true
