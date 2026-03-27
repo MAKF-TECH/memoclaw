@@ -15,7 +15,7 @@ PUBLIC_PATHS = {"/health", "/health/ready", "/docs", "/openapi.json", "/redoc"}
 
 # Web UI paths that need session auth (not bearer)
 WEBUI_PATHS = {"/", "/login"}
-WEBUI_PREFIXES = ("/static/",)
+WEBUI_PREFIXES = ("/static/", "/assets/")
 
 # Auth API paths (login/logout endpoints)
 AUTH_API_PATHS = {"/auth/login", "/auth/logout", "/auth/me"}
@@ -55,7 +55,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Login page — no auth needed
-        if path == "/login":
+        if path in ("/login", "/login.html"):
             return await call_next(request)
 
         # Web UI root — check session cookie, redirect to login if missing
