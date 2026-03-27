@@ -15,6 +15,9 @@ const COLORS = {
   episode: '#06b6d4',
 }
 
+// How many top-degree nodes get a permanent visible label
+const MAX_LABELS = 10
+
 export default function GraphView() {
   const [mems, setMems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -40,7 +43,7 @@ export default function GraphView() {
   // ── Build edges: chain within same container ─────────────────────────────
   const links = []
   const byContainer = {}
-  mems.forEach((m) => {
+  mems.forEach(m => {
     const tag = m.containerTag || '__none__'
     ;(byContainer[tag] = byContainer[tag] || []).push(m.id)
   })
@@ -59,14 +62,22 @@ export default function GraphView() {
   })
   const maxDeg = Math.max(1, ...Object.values(degree))
 
+  // Top-N ids that get permanent labels
+  const topIds = new Set(
+    [...mems]
+      .sort((a, b) => (degree[b.id] || 0) - (degree[a.id] || 0))
+      .slice(0, mems.length <= 15 ? mems.length : MAX_LABELS)
+      .map(m => m.id)
+  )
+
   // ── Nodes ─────────────────────────────────────────────────────────────────
   const nodes = mems.map(m => {
     const deg = degree[m.id] || 0
     const norm = deg / maxDeg
-    // Size range 6–38: hubs are clearly bigger, leaves are small dots
-    const size = 6 + norm * 32
+    // Size: 5px leaf → 40px top hub
+    const size = 5 + norm * 35
     const color = COLORS[m.type] || COLORS.fact
-    const isHub = deg >= maxDeg * 0.4
+    const isTopHub = topIds.has(m.id)
 
     return {
       id: m.id,
@@ -76,27 +87,36 @@ export default function GraphView() {
       value: deg,
       itemStyle: {
         color,
-        borderColor: 'rgba(255,255,255,0.12)',
-        borderWidth: isHub ? 1.5 : 0,
-        shadowBlur: isHub ? 10 : 0,
-        shadowColor: color + '55',
+        borderColor: isTopHub ? 'rgba(255,255,255,0.25)' : 'transparent',
+        borderWidth: isTopHub ? 1.5 : 0,
+        shadowBlur: isTopHub ? 12 : 0,
+        shadowColor: color + '44',
+        opacity: 1,
       },
+      // Only top-N get permanent labels; rest show on hover via emphasis
       label: {
-        show: isHub || mems.length < 20,
-        fontSize: isHub ? 10 : 9,
-        fontWeight: isHub ? 600 : 400,
-        color: '#d1d5db',
-        distance: 5,
+        show: isTopHub,
+        position: 'right',
+        distance: 6,
+        fontSize: isTopHub ? 11 : 10,
+        fontWeight: isTopHub ? 600 : 400,
+        color: '#e5e7eb',
+        // Truncate to 28 chars max — short enough to avoid overlap
         formatter: ({ data }) => {
           const t = data.name || ''
-          return t.length > 38 ? t.slice(0, 35) + '…' : t
+          return t.length > 28 ? t.slice(0, 25) + '…' : t
         },
+        // Hard overflow clip so label never exceeds its budget
+        overflow: 'truncate',
+        width: 160,
       },
     }
   })
 
+  const n = mems.length
   const option = {
     backgroundColor: 'transparent',
+
     tooltip: {
       trigger: 'item',
       backgroundColor: '#0f0f1a',
@@ -104,46 +124,53 @@ export default function GraphView() {
       borderWidth: 1,
       padding: [8, 12],
       textStyle: { color: '#e5e7eb', fontSize: 12 },
+      confine: true,
       formatter(params) {
         if (params.dataType !== 'node') return ''
         const m = mems.find(x => x.id === params.data.id)
         if (!m) return ''
         const deg = degree[m.id] || 0
         return `
-          <div style="max-width:290px">
+          <div style="max-width:280px">
             <div style="font-weight:600;margin-bottom:5px;color:#f3f4f6;line-height:1.45">${m.memory}</div>
-            <div style="font-size:11px;color:#6b7280;display:flex;gap:6px;flex-wrap:wrap">
-              <span style="background:rgba(255,255,255,0.05);padding:1px 6px;border-radius:3px;text-transform:capitalize">${m.type}</span>
-              ${m.isStatic ? '<span style="background:rgba(255,255,255,0.05);padding:1px 6px;border-radius:3px">static</span>' : ''}
-              <span style="background:rgba(255,255,255,0.05);padding:1px 6px;border-radius:3px">${m.containerTag || 'untagged'}</span>
-              <span style="background:rgba(124,58,237,0.18);color:#a78bfa;padding:1px 6px;border-radius:3px">${deg} links</span>
+            <div style="font-size:11px;color:#6b7280;display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+              <span style="background:rgba(255,255,255,0.06);padding:1px 7px;border-radius:3px;text-transform:capitalize">${m.type}</span>
+              ${m.isStatic ? '<span style="background:rgba(255,255,255,0.06);padding:1px 7px;border-radius:3px">static</span>' : ''}
+              <span style="background:rgba(255,255,255,0.06);padding:1px 7px;border-radius:3px">${m.containerTag || 'untagged'}</span>
+              <span style="background:rgba(124,58,237,0.2);color:#a78bfa;padding:1px 7px;border-radius:3px">${deg} links</span>
             </div>
           </div>`
       },
     },
+
     legend: {
       data: ['Fact', 'Preference', 'Episode'],
-      bottom: 12,
+      bottom: 10,
       left: 'center',
       textStyle: { color: '#6b7280', fontSize: 11 },
       itemWidth: 10,
       itemHeight: 10,
       icon: 'circle',
     },
+
     series: [{
       type: 'graph',
       layout: 'force',
       roam: true,
       draggable: true,
-      scaleLimit: { min: 0.25, max: 4 },
+      scaleLimit: { min: 0.2, max: 5 },
 
       force: {
-        // More repulsion for hubs — spread them apart naturally
-        repulsion: mems.length > 80 ? 160 : mems.length > 40 ? 250 : 380,
-        gravity: 0.12,
-        edgeLength: mems.length > 80 ? 60 : mems.length > 40 ? 90 : 130,
-        friction: 0.6,
+        repulsion: n > 100 ? 120 : n > 50 ? 200 : 320,
+        gravity: 0.15,
+        edgeLength: n > 100 ? 45 : n > 50 ? 70 : 110,
+        friction: 0.65,
         layoutAnimation: true,
+      },
+
+      // labelLayout: prevent overlap — hide colliding labels automatically
+      labelLayout: {
+        hideOverlap: true,
       },
 
       categories: [
@@ -153,37 +180,55 @@ export default function GraphView() {
       ],
 
       data: nodes,
+
       links: links.map(l => ({
         source: l.source,
         target: l.target,
         lineStyle: {
-          color: 'rgba(148,163,184,0.2)',
-          width: 1,
-          curveness: 0.1,
+          color: 'rgba(148,163,184,0.15)',
+          width: 0.8,
+          curveness: 0.08,
         },
       })),
 
       emphasis: {
         focus: 'adjacency',
         blurScope: 'coordinateSystem',
-        label: { show: true, fontSize: 11, color: '#f9fafb' },
-        lineStyle: { width: 2, color: 'rgba(148,163,184,0.7)' },
+        // Show label on any hovered node
+        label: {
+          show: true,
+          fontSize: 11,
+          fontWeight: 600,
+          color: '#f9fafb',
+          formatter: ({ data }) => {
+            const t = data.name || ''
+            return t.length > 40 ? t.slice(0, 37) + '…' : t
+          },
+          overflow: 'truncate',
+          width: 200,
+        },
+        itemStyle: {
+          shadowBlur: 16,
+          borderWidth: 2,
+          borderColor: 'rgba(255,255,255,0.4)',
+        },
+        lineStyle: { width: 1.5, opacity: 0.6 },
       },
 
       blur: {
-        itemStyle: { opacity: 0.1 },
-        lineStyle: { opacity: 0.04 },
+        itemStyle: { opacity: 0.08 },
+        lineStyle: { opacity: 0.03 },
         label: { show: false },
       },
 
-      animationDuration: 1500,
+      animationDuration: 1800,
       animationEasingUpdate: 'quinticInOut',
     }],
   }
 
   return (
     <div className="p-8 animate-in fade-in duration-300">
-      <PageHeader title="Memory Graph" subtitle="Force-directed — node size = connection degree">
+      <PageHeader title="Memory Graph" subtitle={`Top ${MAX_LABELS} hubs labelled · hover any node to reveal · size = degree`}>
         <Select value={container} onChange={e => setContainer(e.target.value)}>
           <option value="">All containers</option>
           {containers.map(c => <option key={c} value={c}>{c}</option>)}
